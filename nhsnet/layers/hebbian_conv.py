@@ -19,19 +19,31 @@ class HebbianConv2d(nn.Conv2d):
             # Compute local activations for Hebbian update
             with torch.no_grad():
                 # Unfold input for correlation computation
-                unfolded = F.unfold(x, self.kernel_size)
-                # Compute correlation between input and output
-                pre_synaptic = unfolded.transpose(1, 2)
-                post_synaptic = output.flatten(2)
+                batch_size = x.size(0)
+                kernel_size = self._pair(self.kernel_size)
+                unfolded = F.unfold(x, kernel_size, 
+                                  stride=self.stride,
+                                  padding=self.padding,
+                                  dilation=self.dilation)
+                
+                # Reshape unfolded input for correlation
+                n_locations = unfolded.size(-1)
+                pre_synaptic = unfolded.view(batch_size, self.in_channels * kernel_size[0] * kernel_size[1], n_locations)
+                post_synaptic = output.view(batch_size, self.out_channels, -1)
+                
+                # Compute correlation between pre and post synaptic activations
+                correlation = torch.zeros_like(self.weight).view(self.out_channels, -1)
+                for i in range(batch_size):
+                    correlation.add_(torch.mm(post_synaptic[i], pre_synaptic[i].t()))
+                correlation.div_(batch_size * n_locations)
                 
                 # Hebbian update
-                correlation = torch.bmm(pre_synaptic.transpose(1, 2), post_synaptic)
                 hebbian_update = self.hebbian_lr * (
-                    correlation.mean(0) - self.decay_factor * self.weight.view(self.out_channels, -1)
+                    correlation - self.decay_factor * self.weight.view(self.out_channels, -1)
                 )
                 
                 # Update traces
-                self.hebbian_traces.add_(hebbian_update.view_as(self.weight))
+                self.hebbian_traces.view(self.out_channels, -1).add_(hebbian_update)
                 
                 # Apply traces to weights
                 self.weight.data.add_(self.hebbian_traces)
