@@ -51,12 +51,23 @@ class HodgkinHuxleyGating(nn.Module):
         m_gate = m_gate.view(B, -1, 1, 1)
         h_gate = h_gate.view(B, -1, 1, 1)
         
-        # Update gating variables with temporal dynamics
-        self.n = self.n + self.beta * (torch.sigmoid(n_gate) - self.n)
-        self.m = self.m + self.beta * (torch.sigmoid(m_gate) - self.m)
-        self.h = self.h + self.beta * (torch.sigmoid(h_gate) - self.h)
+        # Create new gating variables for this forward pass
+        n_new = torch.sigmoid(n_gate)
+        m_new = torch.sigmoid(m_gate)
+        h_new = torch.sigmoid(h_gate)
         
-        # Apply gating function
+        # Update gating variables with temporal dynamics
+        # Detach previous states to avoid building up the graph
+        n_current = self.n.detach()
+        m_current = self.m.detach()
+        h_current = self.h.detach()
+        
+        # Compute new states
+        self.n = n_current + self.beta * (n_new - n_current)
+        self.m = m_current + self.beta * (m_new - m_current)
+        self.h = h_current + self.beta * (h_new - h_current)
+        
+        # Apply gating function using current states
         gated_output = x * self.n * self.m * self.h
         
         # Reset membrane potential if threshold is reached
