@@ -74,24 +74,11 @@ The training script includes:
 - Data augmentation for CIFAR-100
 - Learning rate scheduling
 - Adaptive synaptic pruning
-- WandB integration for experiment tracking
 - Progress bars with tqdm
-- Validation after each epoch
+- Best model checkpointing
+- Detailed training metrics
 
-### Monitoring Training
-
-The training progress is automatically logged to Weights & Biases (wandb). You can view:
-- Training/validation loss
-- Accuracy metrics
-- Network sparsity
-- Neurogenesis statistics
-
-To view the training dashboard:
-1. Create a wandb account if you haven't already
-2. Login: `wandb login`
-3. View results at: https://wandb.ai/your-username/nhsnet
-
-## Architecture
+### Model Architecture
 NHS-Net combines several biologically-inspired mechanisms:
 
 1. **Hebbian Learning**: Implements "neurons that fire together, wire together" principle
