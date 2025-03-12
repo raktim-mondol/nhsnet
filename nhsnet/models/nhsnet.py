@@ -34,6 +34,23 @@ class NHSNetBlock(nn.Module):
         self.gating = HodgkinHuxleyGating(out_channels)
         self.bn = nn.BatchNorm2d(out_channels)
         
+    def update_channels(self, new_channels):
+        """Update all layers to match new channel dimensions"""
+        # Update sparse conv
+        self.sparse_conv = StructuredSparseConv2d(
+            new_channels,
+            new_channels,
+            kernel_size=self.sparse_conv.kernel_size[0],
+            padding=self.sparse_conv.padding[0],
+            sparsity_ratio=self.sparse_conv.sparsity_ratio
+        ).to(self.sparse_conv.weight.device)
+        
+        # Update gating
+        self.gating = HodgkinHuxleyGating(new_channels).to(self.gating.v_threshold.device)
+        
+        # Update batch norm
+        self.bn = nn.BatchNorm2d(new_channels).to(self.bn.weight.device)
+        
     def forward(self, x):
         x = self.conv1(x)
         x = self.sparse_conv(x)
@@ -86,9 +103,7 @@ class NHSNet(nn.Module):
     def forward(self, x):
         x = self.input_conv(x)
         
-        for block in self.blocks:
-            x = block(x)
-            
+        for i, block in enumerate(self.blocks):
             # Apply neurogenesis if needed
             if self.training:
                 activation_patterns = x.detach()
@@ -96,10 +111,40 @@ class NHSNet(nn.Module):
                     self.neurogenesis.compute_activation_statistics(activation_patterns)
                 
                 if under_activated.any():
-                    block.conv1 = self.neurogenesis.expand_layer(
+                    # Expand the current block's conv1 layer
+                    new_conv1 = self.neurogenesis.expand_layer(
                         block.conv1,
                         activation_patterns
                     )
+                    
+                    if new_conv1 is not block.conv1:  # If layer was expanded
+                        block.conv1 = new_conv1
+                        block.update_channels(new_conv1.out_channels)
+                        
+                        # Update next block's input channels if it exists
+                        if i < len(self.blocks) - 1:
+                            next_block = self.blocks[i + 1]
+                            next_block.conv1 = HebbianConv2d(
+                                new_conv1.out_channels,
+                                next_block.conv1.out_channels,
+                                kernel_size=next_block.conv1.kernel_size[0],
+                                padding=next_block.conv1.padding[0],
+                                hebbian_lr=next_block.conv1.hebbian_lr
+                            ).to(next_block.conv1.weight.device)
+                        else:
+                            # Update classifier input features for the last block
+                            old_weight = self.classifier.weight.data
+                            old_bias = self.classifier.bias.data
+                            self.classifier = nn.Linear(
+                                new_conv1.out_channels,
+                                self.classifier.out_features
+                            ).to(old_weight.device)
+                            
+                            # Initialize with zeros for new features
+                            self.classifier.weight.data[:, :old_weight.size(1)] = old_weight
+                            self.classifier.bias.data = old_bias
+            
+            x = block(x)
         
         x = self.global_pool(x)
         x = x.view(x.size(0), -1)
