@@ -15,6 +15,7 @@ class NHSNetBlock(nn.Module):
                  sparsity_ratio=0.5):
         super().__init__()
         
+        self.hebbian_lr = hebbian_lr  # Store hebbian_lr at block level
         self.conv1 = HebbianConv2d(
             in_channels, 
             out_channels, 
@@ -127,12 +128,13 @@ class NHSNet(nn.Module):
                         # Update next block's input channels if it exists
                         if i < len(self.blocks) - 1:
                             next_block = self.blocks[i + 1]
+                            # Create new HebbianConv2d with stored hebbian_lr
                             next_block.conv1 = HebbianConv2d(
                                 new_conv1.out_channels,
                                 next_block.conv1.out_channels,
-                                kernel_size=next_block.conv1.kernel_size[0],
-                                padding=next_block.conv1.padding[0],
-                                hebbian_lr=next_block.conv1.hebbian_lr
+                                kernel_size=3,
+                                padding=1,
+                                hebbian_lr=next_block.hebbian_lr  # Use stored hebbian_lr
                             ).to(device)
                         else:
                             # Update classifier input features for the last block
