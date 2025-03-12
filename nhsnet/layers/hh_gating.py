@@ -36,20 +36,22 @@ class HodgkinHuxleyGating(nn.Module):
         Args:
             x: Input tensor [B, C, H, W]
         """
+        batch_size = x.size(0)
+        device = x.device
+        
         # Compute channel-wise statistics
         x_stats = torch.mean(x, dim=[2, 3])  # [B, C]
         
         # Get gating variables from neural network
         gate_output = self.gate_network(x_stats)  # [B, C*3]
-        B, _ = gate_output.shape
         
         # Split into individual gates
         n_gate, m_gate, h_gate = torch.split(gate_output, self.channels, dim=1)
         
         # Reshape gates to match spatial dimensions
-        n_gate = n_gate.view(B, -1, 1, 1)
-        m_gate = m_gate.view(B, -1, 1, 1)
-        h_gate = h_gate.view(B, -1, 1, 1)
+        n_gate = n_gate.view(batch_size, -1, 1, 1)
+        m_gate = m_gate.view(batch_size, -1, 1, 1)
+        h_gate = h_gate.view(batch_size, -1, 1, 1)
         
         # Create new gating variables for this forward pass
         n_new = torch.sigmoid(n_gate)
@@ -57,18 +59,24 @@ class HodgkinHuxleyGating(nn.Module):
         h_new = torch.sigmoid(h_gate)
         
         # Update gating variables with temporal dynamics
-        # Detach previous states to avoid building up the graph
-        n_current = self.n.detach()
-        m_current = self.m.detach()
-        h_current = self.h.detach()
+        # Expand stored states to match batch dimension
+        n_current = self.n.detach().expand(batch_size, -1, -1, -1)
+        m_current = self.m.detach().expand(batch_size, -1, -1, -1)
+        h_current = self.h.detach().expand(batch_size, -1, -1, -1)
         
         # Compute new states
-        self.n = n_current + self.beta * (n_new - n_current)
-        self.m = m_current + self.beta * (m_new - m_current)
-        self.h = h_current + self.beta * (h_new - h_current)
+        n_updated = n_current + self.beta * (n_new - n_current)
+        m_updated = m_current + self.beta * (m_new - m_current)
+        h_updated = h_current + self.beta * (h_new - h_current)
         
-        # Apply gating function using current states
-        gated_output = x * self.n * self.m * self.h
+        # Update stored states with mean across batch dimension
+        with torch.no_grad():
+            self.n = n_updated.mean(dim=0, keepdim=True).detach()
+            self.m = m_updated.mean(dim=0, keepdim=True).detach()
+            self.h = h_updated.mean(dim=0, keepdim=True).detach()
+        
+        # Apply gating function using current batch states
+        gated_output = x * n_updated * m_updated * h_updated
         
         # Reset membrane potential if threshold is reached
         above_threshold = (torch.abs(gated_output) > self.v_threshold).float()
