@@ -64,6 +64,9 @@ class DynamicNeurogenesisModule(nn.Module):
             projection_matrix = torch.randn(basis_vectors.size(1), total_weights, device=basis_vectors.device)
             basis_vectors = torch.mm(basis_vectors, projection_matrix)
         
+        # Normalize the weights
+        basis_vectors = F.normalize(basis_vectors, dim=1)
+        
         # Reshape to convolutional weights
         new_weights = basis_vectors.view(
             basis_vectors.size(0),  # number of new neurons
@@ -71,10 +74,6 @@ class DynamicNeurogenesisModule(nn.Module):
             layer.kernel_size[0],
             layer.kernel_size[1]
         )
-        
-        # Normalize the weights
-        new_weights = F.normalize(new_weights.view(new_weights.size(0), -1), dim=1)
-        new_weights = new_weights.view_as(new_weights)
         
         return new_weights
         
@@ -98,7 +97,7 @@ class DynamicNeurogenesisModule(nn.Module):
         if isinstance(layer, nn.Conv2d):
             expanded_layer = nn.Conv2d(
                 layer.in_channels,
-                layer.out_channels + len(new_weights),
+                layer.out_channels + new_weights.size(0),
                 layer.kernel_size,
                 stride=layer.stride,
                 padding=layer.padding,
@@ -117,7 +116,7 @@ class DynamicNeurogenesisModule(nn.Module):
         else:  # Linear layer
             expanded_layer = nn.Linear(
                 layer.in_features,
-                layer.out_features + len(new_weights),
+                layer.out_features + new_weights.size(0),
                 bias=layer.bias is not None
             )
             
