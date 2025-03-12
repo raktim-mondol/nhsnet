@@ -63,6 +63,19 @@ model = NHSNet(
 python examples/train_cifar.py --epochs 100 --batch-size 128 --lr 0.001
 ```
 
+## Documentation
+
+For a comprehensive list of references and theoretical foundations of NHS-Net, please see [REFERENCES.md](docs/REFERENCES.md).
+
+The references cover:
+1. Hebbian Learning Theory and Implementation
+2. Neurogenesis in Biology and Deep Learning
+3. Synaptic Pruning Mechanisms
+4. Sparse Neural Circuitry
+5. Hodgkin-Huxley Model Adaptations
+6. Dynamic Architecture Growth
+7. General Neuroscience and Deep Learning References
+
 ## Development
 
 ### Setup Development Environment
