@@ -43,13 +43,13 @@ class NHSNetBlock(nn.Module):
         self.sparse_conv = StructuredSparseConv2d(
             new_channels,
             new_channels,
-            kernel_size=self.sparse_conv.kernel_size[0],
-            padding=self.sparse_conv.padding[0],
+            kernel_size=3,
+            padding=1,
             sparsity_ratio=self.sparse_conv.sparsity_ratio
         ).to(device)
         
         # Update gating
-        self.gating = HodgkinHuxleyGating(new_channels)
+        self.gating = HodgkinHuxleyGating(new_channels).to(device)
         
         # Update batch norm
         self.bn = nn.BatchNorm2d(new_channels).to(device)
@@ -103,6 +103,14 @@ class NHSNet(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.classifier = nn.Linear(current_channels, num_classes)
         
+    def to(self, device):
+        """Override to method to ensure proper device placement"""
+        super().to(device)
+        # Ensure gating buffers are on the correct device
+        for block in self.blocks:
+            block.gating.reset_state()  # This will create new buffers on the correct device
+        return self
+        
     def forward(self, x):
         x = self.input_conv(x)
         
@@ -121,7 +129,7 @@ class NHSNet(nn.Module):
                     )
                     
                     if new_conv1 is not block.conv1:  # If layer was expanded
-                        device = block.conv1.weight.device
+                        device = x.device  # Use input tensor's device
                         block.conv1 = new_conv1.to(device)
                         block.update_channels(new_conv1.out_channels)
                         
