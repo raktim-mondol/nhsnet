@@ -14,15 +14,15 @@ class AdaptiveSynapticPruning:
         self.pruning_interval = pruning_interval
         self.min_weights = min_weights
         self.step_counter = 0
-        self.masks = self._initialize_masks()
+        self.masks = {}
+        self._update_masks()
         
-    def _initialize_masks(self):
-        """Initialize binary masks for all weights"""
-        masks = {}
+    def _update_masks(self):
+        """Update masks to match current layer sizes"""
         for name, param in self.model.named_parameters():
             if 'weight' in name:
-                masks[name] = torch.ones_like(param)
-        return masks
+                if name not in self.masks or self.masks[name].size() != param.size():
+                    self.masks[name] = torch.ones_like(param)
         
     def _compute_threshold(self, weights):
         """Compute pruning threshold based on weight distribution"""
@@ -34,6 +34,7 @@ class AdaptiveSynapticPruning:
         self.step_counter += 1
         
         if self.step_counter % self.pruning_interval == 0:
+            self._update_masks()  # Update masks before pruning
             self._prune_weights()
             
     def _prune_weights(self):
@@ -57,6 +58,7 @@ class AdaptiveSynapticPruning:
                 
     def apply_masks(self):
         """Apply existing masks to weights"""
+        self._update_masks()  # Ensure masks match current layer sizes
         for name, param in self.model.named_parameters():
-            if 'weight' in name and name in self.masks:
+            if 'weight' in name:
                 param.data.mul_(self.masks[name])
