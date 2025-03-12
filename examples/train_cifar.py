@@ -5,25 +5,35 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 import wandb
+import argparse
 
 from nhsnet.models import NHSNet
 from nhsnet.utils.pruning import AdaptiveSynapticPruning
 
-def train(
-    epochs=100,
-    batch_size=128,
-    learning_rate=0.001,
-    hebbian_lr=0.01,
-    sparsity_ratio=0.5,
-    device="cuda"
-):
+def parse_args():
+    parser = argparse.ArgumentParser(description='Train NHS-Net on CIFAR-100')
+    parser.add_argument('--epochs', type=int, default=100,
+                        help='number of epochs to train')
+    parser.add_argument('--batch-size', type=int, default=128,
+                        help='input batch size for training')
+    parser.add_argument('--learning-rate', type=float, default=0.001,
+                        help='learning rate')
+    parser.add_argument('--hebbian-lr', type=float, default=0.01,
+                        help='hebbian learning rate')
+    parser.add_argument('--sparsity-ratio', type=float, default=0.5,
+                        help='sparsity ratio for structured sparse layers')
+    parser.add_argument('--device', type=str, default='cuda',
+                        help='device to train on (cuda or cpu)')
+    return parser.parse_args()
+
+def train(args):
     # Initialize wandb
     wandb.init(project="nhsnet", config={
-        "epochs": epochs,
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "hebbian_lr": hebbian_lr,
-        "sparsity_ratio": sparsity_ratio
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "learning_rate": args.learning_rate,
+        "hebbian_lr": args.hebbian_lr,
+        "sparsity_ratio": args.sparsity_ratio
     })
 
     # Data loading
@@ -49,7 +59,7 @@ def train(
     )
     trainloader = DataLoader(
         trainset, 
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         shuffle=True, 
         num_workers=2
     )
@@ -62,7 +72,7 @@ def train(
     )
     testloader = DataLoader(
         testset, 
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         shuffle=False, 
         num_workers=2
     )
@@ -71,13 +81,13 @@ def train(
     model = NHSNet(
         input_channels=3,
         num_classes=100,
-        hebbian_lr=hebbian_lr,
-        sparsity_ratio=sparsity_ratio
-    ).to(device)
+        hebbian_lr=args.hebbian_lr,
+        sparsity_ratio=args.sparsity_ratio
+    ).to(args.device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
     # Initialize pruning
     pruning = AdaptiveSynapticPruning(
@@ -87,15 +97,16 @@ def train(
     )
 
     # Training loop
-    for epoch in range(epochs):
+    for epoch in range(args.epochs):
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
 
-        with tqdm(trainloader, desc=f'Epoch {epoch+1}/{epochs}') as pbar:
+        with tqdm(trainloader, desc=f'Epoch {epoch+1}/{args.epochs}') as pbar:
             for inputs, targets in pbar:
-                inputs, targets = inputs.to(device), targets.to(device)
+                inputs = inputs.to(args.device)
+                targets = targets.to(args.device)
 
                 optimizer.zero_grad()
                 outputs = model(inputs)
@@ -125,7 +136,8 @@ def train(
 
         with torch.no_grad():
             for inputs, targets in testloader:
-                inputs, targets = inputs.to(device), targets.to(device)
+                inputs = inputs.to(args.device)
+                targets = targets.to(args.device)
                 outputs = model(inputs)
                 loss = criterion(outputs, targets)
 
@@ -140,7 +152,8 @@ def train(
         wandb.log({
             "train_loss": running_loss/len(trainloader),
             "test_loss": test_loss/len(testloader),
-            "test_acc": test_acc
+            "test_acc": test_acc,
+            "epoch": epoch
         })
 
         scheduler.step()
@@ -148,4 +161,5 @@ def train(
     wandb.finish()
 
 if __name__ == "__main__":
-    train()
+    args = parse_args()
+    train(args)
