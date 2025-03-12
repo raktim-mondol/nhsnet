@@ -4,7 +4,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
-import wandb
 import argparse
 
 from nhsnet.models import NHSNet
@@ -27,14 +26,13 @@ def parse_args():
     return parser.parse_args()
 
 def train(args):
-    # Initialize wandb
-    wandb.init(project="nhsnet", config={
-        "epochs": args.epochs,
-        "batch_size": args.batch_size,
-        "learning_rate": args.learning_rate,
-        "hebbian_lr": args.hebbian_lr,
-        "sparsity_ratio": args.sparsity_ratio
-    })
+    print(f"Training NHS-Net with parameters:")
+    print(f"Epochs: {args.epochs}")
+    print(f"Batch size: {args.batch_size}")
+    print(f"Learning rate: {args.learning_rate}")
+    print(f"Hebbian learning rate: {args.hebbian_lr}")
+    print(f"Sparsity ratio: {args.sparsity_ratio}")
+    print(f"Device: {args.device}")
 
     # Data loading
     transform_train = transforms.Compose([
@@ -96,6 +94,7 @@ def train(args):
         pruning_interval=100
     )
 
+    best_acc = 0.0
     # Training loop
     for epoch in range(args.epochs):
         model.train()
@@ -148,17 +147,28 @@ def train(args):
 
         test_acc = 100.*correct/total
         
-        # Log metrics
-        wandb.log({
-            "train_loss": running_loss/len(trainloader),
-            "test_loss": test_loss/len(testloader),
-            "test_acc": test_acc,
-            "epoch": epoch
-        })
+        # Print metrics
+        print(f'\nEpoch: {epoch+1}')
+        print(f'Train Loss: {running_loss/len(trainloader):.3f}')
+        print(f'Test Loss: {test_loss/len(testloader):.3f}')
+        print(f'Test Accuracy: {test_acc:.2f}%')
+
+        # Save best model
+        if test_acc > best_acc:
+            best_acc = test_acc
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'test_acc': test_acc,
+            }, 'best_model.pth')
+            print(f'New best model saved with accuracy: {test_acc:.2f}%')
 
         scheduler.step()
 
-    wandb.finish()
+    print(f"\nTraining completed!")
+    print(f"Best test accuracy: {best_acc:.2f}%")
+    print(f"Best model saved as 'best_model.pth'")
 
 if __name__ == "__main__":
     args = parse_args()
