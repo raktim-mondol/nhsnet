@@ -1,20 +1,18 @@
-# NHS-Net: Neurogenesis-Hebbian Sparse Network
+# NHS-Net: Neural Hebbian System Network
 
-NHS-Net is a novel deep learning architecture that integrates biological principles including:
-- Hebbian Learning
-- Neurogenesis
-- Synaptic Pruning
-- Sparse Neural Circuitry
-- Hodgkin-Huxley Gating
+A PyTorch implementation of NHS-Net, featuring Hebbian learning, structured sparsity, and dynamic neurogenesis.
 
 ## Features
-- Dynamic architecture adaptation through neurogenesis
-- Energy-efficient sparse connectivity
-- Biologically-inspired Hebbian learning
-- Adaptive synaptic pruning
-- Voltage-gated activations
+
+- Hebbian Convolutional Layer with local learning rules
+- Structured Sparse Convolution for efficient computation
+- Hodgkin-Huxley Gating mechanism
+- Dynamic Neurogenesis Module
+- Adaptive Synaptic Pruning
 
 ## Installation
+
+### From Source
 
 1. Clone the repository:
 ```bash
@@ -22,114 +20,102 @@ git clone https://github.com/raktim-mondol/nhsnet.git
 cd nhsnet
 ```
 
-2. Install dependencies and the package in development mode:
+2. Create and activate a virtual environment:
 ```bash
-pip install -r requirements.txt
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On Unix/MacOS:
+source venv/bin/activate
+```
+
+3. Install in development mode:
+```bash
 pip install -e .
 ```
 
-The `-e` flag installs the package in "editable" mode, which means you can modify the source code without reinstalling.
+### Requirements
+
+- Python >= 3.7
+- PyTorch >= 1.9.0
+- torchvision >= 0.10.0
+- numpy >= 1.19.2
+- scipy >= 1.7.0
+- tqdm >= 4.62.0
 
 ## Usage
 
-### Basic Model Usage
+### Training on CIFAR-10
+
 ```python
-from nhsnet.models import NHSNet
+from nhsnet import NHSNet
+import torch
 
+# Create model
 model = NHSNet(
-    input_channels=3,
-    num_classes=1000,
-    hebbian_lr=0.01,
-    sparsity_ratio=0.5
+    in_channels=3,
+    num_classes=10,
+    hidden_channels=[64, 128, 256],
+    hebbian_lr=0.01
 )
+
+# Train the model
+python examples/train_cifar.py --epochs 100 --batch-size 128 --lr 0.001
 ```
 
-### Training on CIFAR-100
+## Development
 
-The repository includes a complete training script for CIFAR-100. To train the model:
+### Setup Development Environment
 
+1. Install development dependencies:
 ```bash
-# From the root directory:
-python examples/train_cifar.py
-
-# Or from the examples directory:
-cd examples
-python train_cifar.py
+pip install -r requirements.txt
 ```
 
-You can customize the training parameters:
-
+2. Install pre-commit hooks:
 ```bash
-python examples/train_cifar.py \
-    --epochs 200 \
-    --batch-size 128 \
-    --learning-rate 0.001 \
-    --hebbian-lr 0.01 \
-    --sparsity-ratio 0.5 \
-    --device cuda
+pre-commit install
 ```
 
-Available parameters:
-- `--epochs`: Number of training epochs (default: 100)
-- `--batch-size`: Batch size for training (default: 128)
-- `--learning-rate`: Learning rate for optimizer (default: 0.001)
-- `--hebbian-lr`: Learning rate for Hebbian updates (default: 0.01)
-- `--sparsity-ratio`: Sparsity ratio for structured sparse layers (default: 0.5)
-- `--device`: Device to train on ('cuda' or 'cpu', default: 'cuda')
+### Code Quality
 
-The training script includes:
-- Data augmentation for CIFAR-100
-- Learning rate scheduling
-- Adaptive synaptic pruning
-- Progress bars with tqdm
-- Best model checkpointing
-- Detailed training metrics
+We use several tools to maintain code quality:
 
-### Model Architecture
-NHS-Net combines several biologically-inspired mechanisms:
+- `black` for code formatting
+- `isort` for import sorting
+- `flake8` for style guide enforcement
+- `mypy` for static type checking
 
-1. **Hebbian Learning**: Implements "neurons that fire together, wire together" principle
-2. **Neurogenesis**: Dynamically adds neurons during training
-3. **Synaptic Pruning**: Removes weak connections to improve efficiency
-4. **Sparse Connectivity**: Maintains biologically-plausible sparse neural circuits
-5. **Hodgkin-Huxley Gating**: Uses voltage-like gating mechanisms
+Run all checks:
+```bash
+# Format code
+black .
+isort .
 
-## Project Structure
-```
-nhsnet/
-├── nhsnet/
-│   ├── __init__.py
-│   ├── layers/
-│   │   ├── __init__.py
-│   │   ├── hebbian_conv.py
-│   │   ├── structured_sparse.py
-│   │   ├── hh_gating.py
-│   │   └── dynamic_neurogenesis.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── nhsnet.py
-│   └── utils/
-│       ├── __init__.py
-│       └── pruning.py
-├── examples/
-│   └── train_cifar.py
-├── setup.py
-├── requirements.txt
-└── README.md
+# Check code
+flake8 .
+mypy .
 ```
 
-## Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
+### Testing
+
+Run tests with coverage:
+```bash
+pytest --cov=nhsnet tests/
+```
 
 ## License
-MIT
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Citation
+
 If you use NHS-Net in your research, please cite:
+
 ```bibtex
 @article{nhsnet2024,
-    title={NHS-Net: A Biologically-Inspired Neural Architecture},
-    author={Mondol, Raktim},
-    year={2024}
+  title={NHS-Net: Neural Hebbian System Network},
+  author={Mondol, Raktim},
+  year={2024}
 }
 ```
