@@ -22,10 +22,13 @@ git clone https://github.com/raktim-mondol/nhsnet.git
 cd nhsnet
 ```
 
-2. Install dependencies:
+2. Install dependencies and the package in development mode:
 ```bash
 pip install -r requirements.txt
+pip install -e .
 ```
+
+The `-e` flag installs the package in "editable" mode, which means you can modify the source code without reinstalling.
 
 ## Usage
 
@@ -46,13 +49,17 @@ model = NHSNet(
 The repository includes a complete training script for CIFAR-100. To train the model:
 
 ```bash
+# From the root directory:
 python examples/train_cifar.py
+
+# Or from the examples directory:
+cd examples
+python train_cifar.py
 ```
 
 You can customize the training parameters:
 
 ```bash
-# Training with custom parameters
 python examples/train_cifar.py \
     --epochs 200 \
     --batch-size 128 \
@@ -86,6 +93,30 @@ NHS-Net combines several biologically-inspired mechanisms:
 3. **Synaptic Pruning**: Removes weak connections to improve efficiency
 4. **Sparse Connectivity**: Maintains biologically-plausible sparse neural circuits
 5. **Hodgkin-Huxley Gating**: Uses voltage-like gating mechanisms
+
+## Project Structure
+```
+nhsnet/
+├── nhsnet/
+│   ├── __init__.py
+│   ├── layers/
+│   │   ├── __init__.py
+│   │   ├── hebbian_conv.py
+│   │   ├── structured_sparse.py
+│   │   ├── hh_gating.py
+│   │   └── dynamic_neurogenesis.py
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── nhsnet.py
+│   └── utils/
+│       ├── __init__.py
+│       └── pruning.py
+├── examples/
+│   └── train_cifar.py
+├── setup.py
+├── requirements.txt
+└── README.md
+```
 
 ## Contributing
 Contributions are welcome! Please feel free to submit a Pull Request.
