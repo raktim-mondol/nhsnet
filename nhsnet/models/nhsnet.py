@@ -36,6 +36,8 @@ class NHSNetBlock(nn.Module):
         
     def update_channels(self, new_channels):
         """Update all layers to match new channel dimensions"""
+        device = self.sparse_conv.weight.device
+        
         # Update sparse conv
         self.sparse_conv = StructuredSparseConv2d(
             new_channels,
@@ -43,13 +45,13 @@ class NHSNetBlock(nn.Module):
             kernel_size=self.sparse_conv.kernel_size[0],
             padding=self.sparse_conv.padding[0],
             sparsity_ratio=self.sparse_conv.sparsity_ratio
-        ).to(self.sparse_conv.weight.device)
+        ).to(device)
         
         # Update gating
-        self.gating = HodgkinHuxleyGating(new_channels).to(self.gating.v_threshold.device)
+        self.gating = HodgkinHuxleyGating(new_channels)
         
         # Update batch norm
-        self.bn = nn.BatchNorm2d(new_channels).to(self.bn.weight.device)
+        self.bn = nn.BatchNorm2d(new_channels).to(device)
         
     def forward(self, x):
         x = self.conv1(x)
@@ -118,7 +120,8 @@ class NHSNet(nn.Module):
                     )
                     
                     if new_conv1 is not block.conv1:  # If layer was expanded
-                        block.conv1 = new_conv1
+                        device = block.conv1.weight.device
+                        block.conv1 = new_conv1.to(device)
                         block.update_channels(new_conv1.out_channels)
                         
                         # Update next block's input channels if it exists
@@ -130,7 +133,7 @@ class NHSNet(nn.Module):
                                 kernel_size=next_block.conv1.kernel_size[0],
                                 padding=next_block.conv1.padding[0],
                                 hebbian_lr=next_block.conv1.hebbian_lr
-                            ).to(next_block.conv1.weight.device)
+                            ).to(device)
                         else:
                             # Update classifier input features for the last block
                             old_weight = self.classifier.weight.data
@@ -138,7 +141,7 @@ class NHSNet(nn.Module):
                             self.classifier = nn.Linear(
                                 new_conv1.out_channels,
                                 self.classifier.out_features
-                            ).to(old_weight.device)
+                            ).to(device)
                             
                             # Initialize with zeros for new features
                             self.classifier.weight.data[:, :old_weight.size(1)] = old_weight
