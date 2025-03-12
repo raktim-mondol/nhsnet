@@ -32,8 +32,13 @@ class DynamicNeurogenesisModule(nn.Module):
         if self.neuron_count >= self.max_neurons:
             return None
             
+        # Flatten activation patterns if needed
+        if len(activation_patterns.shape) > 2:
+            b, c, h, w = activation_patterns.shape
+            activation_patterns = activation_patterns.view(b, c, -1).mean(dim=2)
+            
         # Perform PCA on activation patterns
-        U, S, V = torch.pca_lowrank(activation_patterns, q=self.pca_components)
+        U, S, V = torch.pca_lowrank(activation_patterns, q=min(self.pca_components, activation_patterns.size(1)))
         
         # Number of neurons to add
         n_new = int(self.growth_factor * self.neuron_count)
@@ -49,17 +54,39 @@ class DynamicNeurogenesisModule(nn.Module):
         
     def _generate_conv_weights(self, layer, basis_vectors):
         """Generate new convolutional weights"""
+        # Calculate the total number of weights needed
+        total_weights = layer.in_channels * layer.kernel_size[0] * layer.kernel_size[1]
+        
+        # Ensure basis vectors have the right size
+        if basis_vectors.size(1) != total_weights:
+            # Project basis vectors to the right dimension if needed
+            projection_matrix = torch.randn(basis_vectors.size(1), total_weights, device=basis_vectors.device)
+            basis_vectors = torch.mm(basis_vectors, projection_matrix)
+        
+        # Reshape to convolutional weights
         new_weights = basis_vectors.view(
-            -1, 
-            layer.in_channels, 
-            layer.kernel_size[0], 
+            basis_vectors.size(0),  # number of new neurons
+            layer.in_channels,
+            layer.kernel_size[0],
             layer.kernel_size[1]
         )
+        
+        # Normalize the weights
+        new_weights = F.normalize(new_weights.view(new_weights.size(0), -1), dim=1)
+        new_weights = new_weights.view_as(new_weights)
+        
         return new_weights
         
     def _generate_linear_weights(self, layer, basis_vectors):
         """Generate new linear layer weights"""
-        return basis_vectors.view(-1, layer.in_features)
+        # Project basis vectors if needed
+        if basis_vectors.size(1) != layer.in_features:
+            projection_matrix = torch.randn(basis_vectors.size(1), layer.in_features, device=basis_vectors.device)
+            basis_vectors = torch.mm(basis_vectors, projection_matrix)
+        
+        # Normalize the weights
+        new_weights = F.normalize(basis_vectors, dim=1)
+        return new_weights
         
     def expand_layer(self, layer, activation_patterns):
         """Expand layer with new neurons"""
