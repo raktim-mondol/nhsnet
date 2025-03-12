@@ -3,49 +3,64 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class HodgkinHuxleyGating(nn.Module):
-    """Implements a simplified Hodgkin-Huxley gating mechanism using an MLP approximation"""
-    def __init__(self, channels, beta=0.1, v_threshold=-55.0, v_reset=-70.0):
+    """Implements Hodgkin-Huxley inspired gating mechanism"""
+    def __init__(self, channels, beta=0.1, v_threshold=0.5, v_reset=0.0):
         super().__init__()
         self.channels = channels
         self.beta = beta
         self.v_threshold = v_threshold
         self.v_reset = v_reset
         
-        # Gating network parameters - operates on channel-wise statistics
+        # Initialize gating variables
+        self.register_buffer('n', torch.zeros(1, channels, 1, 1))
+        self.register_buffer('m', torch.zeros(1, channels, 1, 1))
+        self.register_buffer('h', torch.zeros(1, channels, 1, 1))
+        
+        # Neural network for computing gating variables
         self.gate_network = nn.Sequential(
             nn.Linear(channels, channels * 2),
             nn.ReLU(),
-            nn.Linear(channels * 2, channels * 3),  # 3 outputs for m, h, and V
+            nn.Linear(channels * 2, channels * 3)  # 3 gates: n, m, h
         )
-        
-        # Initialize gating variables
-        self.register_buffer('m', torch.ones(channels))
-        self.register_buffer('h', torch.ones(channels))
-        self.register_buffer('V', torch.ones(channels) * v_reset)
         
     def reset_state(self):
         """Reset gating variables to initial state"""
-        self.m.fill_(1.0)
-        self.h.fill_(1.0)
-        self.V.fill_(self.v_reset)
+        device = next(self.parameters()).device
+        self.n = torch.zeros(1, self.channels, 1, 1, device=device)
+        self.m = torch.zeros(1, self.channels, 1, 1, device=device)
+        self.h = torch.zeros(1, self.channels, 1, 1, device=device)
         
     def forward(self, x):
-        batch_size = x.size(0)
+        """
+        Forward pass implementing HH-like gating
+        Args:
+            x: Input tensor [B, C, H, W]
+        """
+        # Compute channel-wise statistics
+        x_stats = torch.mean(x, dim=[2, 3])  # [B, C]
         
-        # Compute channel-wise statistics (mean across spatial dimensions)
-        x_stats = x.view(batch_size, self.channels, -1).mean(dim=2)  # [B, C]
-        
-        # Compute gating variables
+        # Get gating variables from neural network
         gate_output = self.gate_network(x_stats)  # [B, C*3]
-        m_new, h_new, v_new = torch.chunk(gate_output, 3, dim=1)  # Each [B, C]
+        B, _ = gate_output.shape
+        
+        # Split into individual gates
+        n_gate, m_gate, h_gate = torch.split(gate_output, self.channels, dim=1)
+        
+        # Reshape gates to match spatial dimensions
+        n_gate = n_gate.view(B, -1, 1, 1)
+        m_gate = m_gate.view(B, -1, 1, 1)
+        h_gate = h_gate.view(B, -1, 1, 1)
         
         # Update gating variables with temporal dynamics
-        self.m = F.sigmoid(m_new.mean(0))  # Average across batch
-        self.h = F.sigmoid(h_new.mean(0))
-        self.V = torch.tanh(v_new.mean(0)) * (self.v_threshold - self.v_reset) + self.v_reset
+        self.n = self.n + self.beta * (torch.sigmoid(n_gate) - self.n)
+        self.m = self.m + self.beta * (torch.sigmoid(m_gate) - self.m)
+        self.h = self.h + self.beta * (torch.sigmoid(h_gate) - self.h)
         
-        # Compute gating function
-        g_t = self.beta * (self.m ** 3) * self.h * (self.V - self.v_reset)  # [C]
+        # Apply gating function
+        gated_output = x * self.n * self.m * self.h
         
-        # Apply gating to input (broadcast across spatial dimensions)
-        return x * g_t.view(1, -1, 1, 1)  # [B, C, H, W]
+        # Reset membrane potential if threshold is reached
+        above_threshold = (torch.abs(gated_output) > self.v_threshold).float()
+        gated_output = gated_output * (1 - above_threshold) + self.v_reset * above_threshold
+        
+        return gated_output
