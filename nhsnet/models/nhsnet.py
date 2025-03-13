@@ -60,48 +60,7 @@ class NHSNetBlock(nn.Module):
             )
         else:
             self.shortcut = nn.Identity()
-        
-    def update_channels(self, new_out_channels):
-        """Update all layers to match new channel dimensions"""
-        if new_out_channels == self.out_channels:
-            return
-            
-        device = next(self.parameters()).device
-        old_out_channels = self.out_channels
-        
-        # Update conv1
-        self.conv1 = HebbianConv2d(
-            self.in_channels,
-            new_out_channels,
-            kernel_size=3,
-            stride=self.stride,
-            padding=1,
-            hebbian_lr=self.hebbian_lr
-        ).to(device)
-        
-        # Update batch norm layers
-        self.bn1 = nn.BatchNorm2d(new_out_channels).to(device)
-        self.bn2 = nn.BatchNorm2d(new_out_channels).to(device)
-        
-        # Update sparse conv
-        self.sparse_conv = StructuredSparseConv2d(
-            new_out_channels,
-            new_out_channels,
-            kernel_size=3,
-            padding=1,
-            sparsity_ratio=self.sparse_conv.sparsity_ratio
-        ).to(device)
-        
-        # Update gating
-        self.gating = HodgkinHuxleyGating(new_out_channels).to(device)
-        
-        # Update output channels
-        self.out_channels = new_out_channels
-        
-        # Update shortcut
-        self._make_shortcut()
-        self.shortcut = self.shortcut.to(device)
-        
+    
     def forward(self, x):
         identity = x
         
@@ -126,7 +85,7 @@ class NHSNetBlock(nn.Module):
 class NHSNet(nn.Module):
     """Enhanced NHS-Net architecture"""
     def __init__(self,
-                 input_channels=3,
+                 input_channels=256,
                  num_classes=10,
                  initial_channels=64,
                  num_blocks=[2, 2, 2, 2],
@@ -208,14 +167,51 @@ class NHSNet(nn.Module):
     
     def _update_block_channels(self, block, new_channels, next_block=None):
         """Helper method to update block channels and maintain consistency"""
-        # Update current block
-        block.update_channels(new_channels)
+        # Update current block's conv1
+        device = next(block.parameters()).device
+        
+        # Update conv1 and its output channels
+        block.conv1 = HebbianConv2d(
+            block.in_channels,
+            new_channels,
+            kernel_size=3,
+            stride=block.stride,
+            padding=1,
+            hebbian_lr=block.hebbian_lr
+        ).to(device)
+        
+        # Update batch norm layers
+        block.bn1 = nn.BatchNorm2d(new_channels).to(device)
+        block.bn2 = nn.BatchNorm2d(new_channels).to(device)
+        
+        # Update sparse conv to match new channels
+        block.sparse_conv = StructuredSparseConv2d(
+            new_channels,
+            new_channels,
+            kernel_size=3,
+            padding=1,
+            sparsity_ratio=block.sparse_conv.sparsity_ratio
+        ).to(device)
+        
+        # Update gating mechanism
+        block.gating = HodgkinHuxleyGating(new_channels).to(device)
+        
+        # Update output channels
+        block.out_channels = new_channels
+        
+        # Update shortcut connection
+        if block.stride != 1 or block.in_channels != new_channels:
+            block.shortcut = nn.Sequential(
+                nn.Conv2d(block.in_channels, new_channels, 
+                         kernel_size=1, stride=block.stride, bias=False),
+                nn.BatchNorm2d(new_channels)
+            ).to(device)
         
         # Update next block's input channels if it exists
         if next_block is not None:
             next_block.in_channels = new_channels
-            next_block._make_shortcut()  # Update shortcut connection
-            next_block = next_block.to(block.conv1.weight.device)
+            next_block._make_shortcut()
+            next_block = next_block.to(device)
     
     def forward(self, x):
         x = self.stem(x)
