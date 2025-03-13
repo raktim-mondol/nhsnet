@@ -7,157 +7,230 @@ from ..layers.hh_gating import HodgkinHuxleyGating
 from ..layers.dynamic_neurogenesis import DynamicNeurogenesisModule
 
 class NHSNetBlock(nn.Module):
-    """Basic building block for NHS-Net"""
+    """Enhanced building block for NHS-Net with residual connections and improved feature extraction"""
     def __init__(self, 
                  in_channels, 
                  out_channels, 
                  hebbian_lr=0.01,
-                 sparsity_ratio=0.5):
+                 sparsity_ratio=0.5,
+                 stride=1):
         super().__init__()
         
-        self.hebbian_lr = hebbian_lr  # Store hebbian_lr at block level
+        self.hebbian_lr = hebbian_lr
+        self.expansion = 4
+        expanded_channels = out_channels * self.expansion
+        
+        # Bottleneck architecture
         self.conv1 = HebbianConv2d(
             in_channels, 
-            out_channels, 
-            kernel_size=3, 
+            out_channels,
+            kernel_size=1,
+            padding=0,
+            hebbian_lr=hebbian_lr
+        )
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        
+        self.conv2 = HebbianConv2d(
+            out_channels,
+            out_channels,
+            kernel_size=3,
+            stride=stride,
             padding=1,
             hebbian_lr=hebbian_lr
         )
+        self.bn2 = nn.BatchNorm2d(out_channels)
         
+        self.conv3 = HebbianConv2d(
+            out_channels,
+            expanded_channels,
+            kernel_size=1,
+            padding=0,
+            hebbian_lr=hebbian_lr
+        )
+        self.bn3 = nn.BatchNorm2d(expanded_channels)
+        
+        # Sparse convolution for feature refinement
         self.sparse_conv = StructuredSparseConv2d(
-            out_channels,
-            out_channels,
+            expanded_channels,
+            expanded_channels,
             kernel_size=3,
             padding=1,
             sparsity_ratio=sparsity_ratio
         )
         
-        self.gating = HodgkinHuxleyGating(out_channels)
-        self.bn = nn.BatchNorm2d(out_channels)
+        # Gating mechanism
+        self.gating = HodgkinHuxleyGating(expanded_channels)
+        
+        # Shortcut connection
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != expanded_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, expanded_channels, kernel_size=1, stride=stride),
+                nn.BatchNorm2d(expanded_channels)
+            )
+        
+        # Dropout for regularization
+        self.dropout = nn.Dropout(0.1)
         
     def update_channels(self, new_channels):
         """Update all layers to match new channel dimensions"""
         device = self.sparse_conv.weight.device
+        expanded_channels = new_channels * self.expansion
         
         # Update sparse conv
         self.sparse_conv = StructuredSparseConv2d(
-            new_channels,
-            new_channels,
+            expanded_channels,
+            expanded_channels,
             kernel_size=3,
             padding=1,
             sparsity_ratio=self.sparse_conv.sparsity_ratio
         ).to(device)
         
         # Update gating
-        self.gating = HodgkinHuxleyGating(new_channels).to(device)
+        self.gating = HodgkinHuxleyGating(expanded_channels).to(device)
         
-        # Update batch norm
-        self.bn = nn.BatchNorm2d(new_channels).to(device)
+        # Update batch norms
+        self.bn3 = nn.BatchNorm2d(expanded_channels).to(device)
         
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.sparse_conv(x)
-        x = self.gating(x)
-        x = self.bn(x)
-        return F.relu(x)
+        identity = x
+        
+        # Bottleneck path
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.relu(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+        
+        # Feature refinement
+        out = self.sparse_conv(out)
+        out = self.gating(out)
+        
+        # Add shortcut connection
+        out += self.shortcut(identity)
+        out = F.relu(out)
+        
+        # Apply dropout
+        out = self.dropout(out)
+        
+        return out
 
 class NHSNet(nn.Module):
-    """Complete NHS-Net architecture"""
+    """Enhanced NHS-Net architecture with improved feature hierarchy"""
     def __init__(self,
                  input_channels=3,
                  num_classes=1000,
                  initial_channels=64,
-                 num_blocks=4,
+                 num_blocks=[3, 4, 6, 3],  # ResNet-like block configuration
                  hebbian_lr=0.01,
                  sparsity_ratio=0.5):
         super().__init__()
         
-        self.input_conv = nn.Conv2d(
-            input_channels, 
-            initial_channels, 
-            kernel_size=7, 
-            stride=2, 
-            padding=3
+        self.initial_channels = initial_channels
+        
+        # Initial convolution with larger receptive field
+        self.stem = nn.Sequential(
+            nn.Conv2d(input_channels, initial_channels // 2, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(initial_channels // 2),
+            nn.ReLU(),
+            nn.Conv2d(initial_channels // 2, initial_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(initial_channels),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         )
         
-        self.blocks = nn.ModuleList()
+        # Build network stages
+        self.stages = nn.ModuleList()
         current_channels = initial_channels
         
-        for i in range(num_blocks):
-            out_channels = current_channels * 2
-            self.blocks.append(
-                NHSNetBlock(
-                    current_channels,
-                    out_channels,
-                    hebbian_lr=hebbian_lr,
-                    sparsity_ratio=sparsity_ratio
+        for i, num_blocks_in_stage in enumerate(num_blocks):
+            stage = []
+            for j in range(num_blocks_in_stage):
+                stride = 2 if j == 0 and i > 0 else 1
+                stage.append(
+                    NHSNetBlock(
+                        current_channels * (1 if j == 0 else 4),
+                        current_channels * 2,
+                        hebbian_lr=hebbian_lr,
+                        sparsity_ratio=sparsity_ratio,
+                        stride=stride
+                    )
                 )
-            )
-            current_channels = out_channels
+            self.stages.append(nn.Sequential(*stage))
+            current_channels *= 2
             
         self.neurogenesis = DynamicNeurogenesisModule(
             initial_neurons=current_channels,
             max_neurons=current_channels * 2
         )
         
+        # Global pooling and classification
         self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = nn.Linear(current_channels, num_classes)
+        self.classifier = nn.Sequential(
+            nn.Linear(current_channels * 4, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, num_classes)
+        )
+        
+        # Initialize weights
+        self._initialize_weights()
+        
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
         
     def to(self, device):
         """Override to method to ensure proper device placement"""
         super().to(device)
         # Ensure gating buffers are on the correct device
-        for block in self.blocks:
-            block.gating.reset_state()  # This will create new buffers on the correct device
+        for stage in self.stages:
+            for block in stage:
+                if hasattr(block, 'gating'):
+                    block.gating.reset_state()
         return self
         
     def forward(self, x):
-        x = self.input_conv(x)
+        x = self.stem(x)
         
-        for i, block in enumerate(self.blocks):
-            # Apply neurogenesis if needed
-            if self.training:
-                activation_patterns = x.detach()
-                mean_activation, under_activated = \
-                    self.neurogenesis.compute_activation_statistics(activation_patterns)
-                
-                if under_activated.any():
-                    # Expand the current block's conv1 layer
-                    new_conv1 = self.neurogenesis.expand_layer(
-                        block.conv1,
-                        activation_patterns
-                    )
+        # Process through stages
+        for stage_idx, stage in enumerate(self.stages):
+            for block_idx, block in enumerate(stage):
+                # Apply neurogenesis if needed
+                if self.training:
+                    activation_patterns = x.detach()
+                    mean_activation, under_activated = \
+                        self.neurogenesis.compute_activation_statistics(activation_patterns)
                     
-                    if new_conv1 is not block.conv1:  # If layer was expanded
-                        device = x.device  # Use input tensor's device
-                        block.conv1 = new_conv1.to(device)
-                        block.update_channels(new_conv1.out_channels)
+                    if under_activated.any():
+                        # Expand the current block's conv1 layer
+                        new_conv1 = self.neurogenesis.expand_layer(
+                            block.conv1,
+                            activation_patterns
+                        )
                         
-                        # Update next block's input channels if it exists
-                        if i < len(self.blocks) - 1:
-                            next_block = self.blocks[i + 1]
-                            # Create new HebbianConv2d with stored hebbian_lr
-                            next_block.conv1 = HebbianConv2d(
-                                new_conv1.out_channels,
-                                next_block.conv1.out_channels,
-                                kernel_size=3,
-                                padding=1,
-                                hebbian_lr=next_block.hebbian_lr  # Use stored hebbian_lr
-                            ).to(device)
-                        else:
-                            # Update classifier input features for the last block
-                            old_weight = self.classifier.weight.data
-                            old_bias = self.classifier.bias.data
-                            self.classifier = nn.Linear(
-                                new_conv1.out_channels,
-                                self.classifier.out_features
-                            ).to(device)
+                        if new_conv1 is not block.conv1:  # If layer was expanded
+                            device = x.device
+                            block.conv1 = new_conv1.to(device)
+                            block.update_channels(new_conv1.out_channels)
                             
-                            # Initialize with zeros for new features
-                            self.classifier.weight.data[:, :old_weight.size(1)] = old_weight
-                            self.classifier.bias.data = old_bias
-            
-            x = block(x)
+                            # Update next block if it exists
+                            if block_idx < len(stage) - 1:
+                                next_block = stage[block_idx + 1]
+                                next_block.conv1 = HebbianConv2d(
+                                    new_conv1.out_channels * 4,
+                                    next_block.conv1.out_channels,
+                                    kernel_size=1,
+                                    padding=0,
+                                    hebbian_lr=next_block.hebbian_lr
+                                ).to(device)
+                
+                x = block(x)
         
         x = self.global_pool(x)
         x = x.view(x.size(0), -1)
