@@ -60,32 +60,11 @@ class NHSNetBlock(nn.Module):
             )
         else:
             self.shortcut = nn.Identity()
-    
-    def forward(self, x):
-        identity = x
-        
-        # Main path
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = F.relu(out)
-        
-        out = self.sparse_conv(out)
-        out = self.bn2(out)
-        out = self.gating(out)
-        
-        # Add shortcut connection
-        out = out + self.shortcut(identity)
-        out = F.relu(out)
-        
-        # Apply dropout
-        out = self.dropout(out)
-        
-        return out
 
 class NHSNet(nn.Module):
     """Enhanced NHS-Net architecture"""
     def __init__(self,
-                 input_channels=256,
+                 input_channels=3,  # Changed from 256 to 3 for CIFAR-10
                  num_classes=10,
                  initial_channels=64,
                  num_blocks=[2, 2, 2, 2],
@@ -234,7 +213,7 @@ class NHSNet(nn.Module):
                         
                         if new_conv1 is not block.conv1:  # If layer was expanded
                             device = x.device
-                            new_conv1 = new_conv1.to(device)
+                            block.conv1 = new_conv1.to(device)
                             new_out_channels = new_conv1.out_channels
                             
                             # Get next block if it exists
@@ -251,7 +230,26 @@ class NHSNet(nn.Module):
                                 next_block
                             )
                 
-                x = block(x)
+                # Forward pass through the block
+                identity = x
+                
+                # Main path with channel checks
+                out = block.conv1(x)  # This should now have matching channels
+                out = block.bn1(out)
+                out = F.relu(out)
+                
+                out = block.sparse_conv(out)
+                out = block.bn2(out)
+                out = block.gating(out)
+                
+                # Add shortcut connection
+                out = out + block.shortcut(identity)
+                out = F.relu(out)
+                
+                # Apply dropout
+                out = block.dropout(out)
+                
+                x = out
         
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
