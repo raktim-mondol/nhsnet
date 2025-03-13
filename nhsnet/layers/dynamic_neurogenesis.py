@@ -24,7 +24,12 @@ class DynamicNeurogenesisModule(nn.Module):
         
     def compute_activation_statistics(self, activations):
         """Compute mean activation and identify underactivated regions"""
-        mean_activation = torch.mean(activations, dim=0)
+        # Ensure we're working with the right shape
+        if len(activations.shape) == 4:  # [B, C, H, W]
+            mean_activation = torch.mean(activations, dim=[0, 2, 3])  # [C]
+        else:
+            mean_activation = torch.mean(activations, dim=0)  # [C]
+            
         under_activated = mean_activation < self.activation_threshold
         return mean_activation, under_activated
         
@@ -41,10 +46,14 @@ class DynamicNeurogenesisModule(nn.Module):
         # Perform PCA on activation patterns
         U, S, V = torch.pca_lowrank(activation_patterns, q=min(self.pca_components, activation_patterns.size(1)))
         
-        # Number of neurons to add
+        # Number of neurons to add (ensure we don't exceed max_neurons)
         n_new = int(self.growth_factor * self.neuron_count)
         n_new = min(n_new, self.max_neurons - self.neuron_count)
         
+        # If no new neurons can be added, return None
+        if n_new <= 0:
+            return None
+            
         if isinstance(layer, nn.Conv2d):
             new_weights = self._generate_conv_weights(layer, V[:n_new])
         else:
@@ -94,36 +103,53 @@ class DynamicNeurogenesisModule(nn.Module):
         if new_weights is None:
             return layer
             
+        # Get the device of the current layer
+        device = layer.weight.device
+            
         if isinstance(layer, nn.Conv2d):
+            # Calculate new output channels
+            new_out_channels = layer.out_channels + new_weights.size(0)
+            
+            # Check if expansion would exceed max neurons
+            if new_out_channels > self.max_neurons:
+                return layer
+                
             expanded_layer = nn.Conv2d(
                 layer.in_channels,
-                layer.out_channels + new_weights.size(0),
+                new_out_channels,
                 layer.kernel_size,
                 stride=layer.stride,
                 padding=layer.padding,
                 bias=layer.bias is not None
-            )
+            ).to(device)
             
             # Copy existing weights and biases
             expanded_layer.weight.data[:layer.out_channels] = layer.weight.data
             if layer.bias is not None:
+                expanded_layer.bias.data = torch.zeros(new_out_channels, device=device)
                 expanded_layer.bias.data[:layer.out_channels] = layer.bias.data
-                expanded_layer.bias.data[layer.out_channels:].zero_()
                 
             # Add new weights
             expanded_layer.weight.data[layer.out_channels:] = new_weights
             
         else:  # Linear layer
+            # Calculate new output features
+            new_out_features = layer.out_features + new_weights.size(0)
+            
+            # Check if expansion would exceed max neurons
+            if new_out_features > self.max_neurons:
+                return layer
+                
             expanded_layer = nn.Linear(
                 layer.in_features,
-                layer.out_features + new_weights.size(0),
+                new_out_features,
                 bias=layer.bias is not None
-            )
+            ).to(device)
             
             expanded_layer.weight.data[:layer.out_features] = layer.weight.data
             if layer.bias is not None:
+                expanded_layer.bias.data = torch.zeros(new_out_features, device=device)
                 expanded_layer.bias.data[:layer.out_features] = layer.bias.data
-                expanded_layer.bias.data[layer.out_features:].zero_()
                 
             expanded_layer.weight.data[layer.out_features:] = new_weights
             
