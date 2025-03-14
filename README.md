@@ -1,134 +1,110 @@
-# NHS-Net: Neural Hebbian System Network
+# CNN-NHSNet: Hybrid Neural Network with Neuroplasticity
 
-A PyTorch implementation of NHS-Net, featuring Hebbian learning, structured sparsity, and dynamic neurogenesis.
+This repository contains a hybrid neural network architecture that combines traditional Convolutional Neural Networks (CNNs) with the Neuroplasticity features of NHSNet (Neural Hebbian-Sparse Network).
 
 ## Features
 
-- Hebbian Convolutional Layer with local learning rules
-- Structured Sparse Convolution for efficient computation
-- Hodgkin-Huxley Gating mechanism
-- Dynamic Neurogenesis Module
-- Adaptive Synaptic Pruning
+- **Hybrid Architecture**: Combines traditional CNN components with neuroplasticity features
+- **Multiple Hybrid Modes**:
+  - `parallel`: Processes inputs through both CNN and NHSNet paths simultaneously
+  - `sequential`: Alternates between CNN blocks and NHSNet blocks
+  - `adaptive`: Uses CNN blocks in early stages and NHSNet blocks in later stages
+- **Dynamic Neurogenesis**: Automatically adds new neurons during training based on activation patterns
+- **Hebbian Learning**: Implements biologically-inspired learning mechanisms
+- **Structured Sparsity**: Maintains sparse connectivity for efficiency
+- **Robust Device Handling**: Ensures all components are on the same device during training
 
-## Installation
+## Requirements
 
-### From Source
+- Python 3.6+
+- PyTorch 1.7+
+- torchvision
+- matplotlib (for visualization)
+- numpy
 
-1. Clone the repository:
+## Example Scripts
+
+### Training Example
+
+The `example_cnn_nhsnet.py` script demonstrates how to train the CNN-NHSNet model on the CIFAR-10 dataset:
+
 ```bash
-git clone https://github.com/raktim-mondol/nhsnet.git
-cd nhsnet
+python example_cnn_nhsnet.py
 ```
 
-2. Create and activate a virtual environment:
+This script:
+1. Downloads and prepares the CIFAR-10 dataset
+2. Creates a CNN-NHSNet model with the 'parallel' hybrid mode
+3. Trains the model for 5 epochs (for demonstration)
+4. Evaluates the model on the test set
+5. Saves the trained model to 'cnn_nhsnet_model.pth'
+
+### Inference Example
+
+The `inference_example.py` script demonstrates how to use the trained model for inference:
+
 ```bash
-python -m venv venv
-# On Windows:
-venv\Scripts\activate
-# On Unix/MacOS:
-source venv/bin/activate
+python inference_example.py
 ```
 
-3. Install in development mode:
+This script:
+1. Loads the CIFAR-10 test dataset
+2. Displays some sample images with their ground truth labels
+3. Loads the CNN-NHSNet model (either pre-trained or untrained)
+4. Makes predictions on the sample images
+5. Evaluates the model on the entire test set
+6. Displays class-wise accuracy
+
+## Advanced Training
+
+For more advanced training options, use the `nhsnet/examples/train_cnn_nhsnet.py` script:
+
 ```bash
-pip install -e .
+python nhsnet/examples/train_cnn_nhsnet.py --epochs 200 --batch-size 128 --learning-rate 0.001 --initial-channels 64 --hybrid-mode parallel --save-model
 ```
 
-### Requirements
+Available options:
+- `--dataset`: Choose between 'cifar10' and 'cifar100'
+- `--batch-size`: Input batch size for training
+- `--epochs`: Number of epochs to train
+- `--learning-rate`: Learning rate
+- `--weight-decay`: Weight decay for regularization
+- `--initial-channels`: Initial number of channels
+- `--hebbian-lr`: Hebbian learning rate
+- `--sparsity-ratio`: Sparsity ratio for structured sparse convolutions
+- `--dropout-rate`: Dropout rate
+- `--hybrid-mode`: Hybrid mode ('parallel', 'sequential', or 'adaptive')
+- `--save-model`: Flag to save the trained model
+- `--save-dir`: Directory to save models
+- `--resume`: Path to a checkpoint to resume training from
 
-- Python >= 3.7
-- PyTorch >= 1.9.0
-- torchvision >= 0.10.0
-- numpy >= 1.19.2
-- scipy >= 1.7.0
-- tqdm >= 4.62.0
+## Model Architecture
 
-## Usage
+The CNN-NHSNet architecture consists of:
 
-### Training on CIFAR-10
+1. **Stem**: Initial convolutional layers for feature extraction
+2. **Stages**: Multiple stages with increasing channel dimensions
+3. **Hybrid Blocks**: Blocks that combine CNN and NHSNet features
+4. **Neurogenesis Module**: Dynamically adds neurons during training
+5. **Classification Head**: Final layers for classification
 
-```python
-from nhsnet import NHSNet
-import torch
+## Performance
 
-# Create model
-model = NHSNet(
-    in_channels=3,
-    num_classes=10,
-    hidden_channels=[64, 128, 256],
-    hebbian_lr=0.01
-)
-
-# Train the model
-python examples/train_cifar.py --epochs 100 --batch-size 128 --lr 0.001
-```
-
-## Documentation
-
-For a comprehensive list of references and theoretical foundations of NHS-Net, please see [REFERENCES.md](docs/REFERENCES.md).
-
-The references cover:
-1. Hebbian Learning Theory and Implementation
-2. Neurogenesis in Biology and Deep Learning
-3. Synaptic Pruning Mechanisms
-4. Sparse Neural Circuitry
-5. Hodgkin-Huxley Model Adaptations
-6. Dynamic Architecture Growth
-7. General Neuroscience and Deep Learning References
-
-## Development
-
-### Setup Development Environment
-
-1. Install development dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-2. Install pre-commit hooks:
-```bash
-pre-commit install
-```
-
-### Code Quality
-
-We use several tools to maintain code quality:
-
-- `black` for code formatting
-- `isort` for import sorting
-- `flake8` for style guide enforcement
-- `mypy` for static type checking
-
-Run all checks:
-```bash
-# Format code
-black .
-isort .
-
-# Check code
-flake8 .
-mypy .
-```
-
-### Testing
-
-Run tests with coverage:
-```bash
-pytest --cov=nhsnet tests/
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+The hybrid approach offers several benefits:
+- Improved stability during training
+- Better feature extraction capabilities
+- Adaptive learning through neuroplasticity
+- Flexible architecture that can be tailored to specific tasks
 
 ## Citation
 
-If you use NHS-Net in your research, please cite:
+If you use this code in your research, please cite:
 
-```bibtex
-@article{nhsnet2024,
-  title={NHS-Net: Neural Hebbian System Network},
+```
+@article{nhsnet2025,
+  title={CNN-NHSNet: A Hybrid Neural Network with Neuroplasticity},
   author={Mondol, Raktim},
-  year={2024}
+  journal={arXiv preprint},
+  year={2025}
 }
 ```
