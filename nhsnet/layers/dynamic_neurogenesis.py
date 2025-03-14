@@ -13,7 +13,8 @@ class DynamicNeurogenesisModule(nn.Module):
                  activation_threshold=0.1,
                  growth_factor=0.1,
                  pca_components=10,
-                 weight_scale=0.01):
+                 weight_scale=0.01,
+                 history_size=5):
         super().__init__()
         self.initial_neurons = initial_neurons
         self.max_neurons = max_neurons
@@ -21,9 +22,13 @@ class DynamicNeurogenesisModule(nn.Module):
         self.growth_factor = growth_factor
         self.pca_components = pca_components
         self.weight_scale = weight_scale
+        self.history_size = history_size
         
         self.activation_history = []
         self.neuron_count = initial_neurons
+        self.last_expansion_step = 0
+        self.min_steps_between_expansions = 100  # Minimum steps between expansions
+        self.current_step = 0
         
     def compute_activation_statistics(self, activations):
         """Compute mean activation and identify underactivated regions"""
@@ -39,11 +44,37 @@ class DynamicNeurogenesisModule(nn.Module):
             
             # Normalize activations
             mean_activation = mean_activation / std_activation
+            
+            # Store activation history for more stable decisions
+            if len(self.activation_history) >= self.history_size:
+                self.activation_history.pop(0)
+            self.activation_history.append(mean_activation.detach().clone())
+            
+            # Average over history for more stable decisions
+            if len(self.activation_history) > 0:
+                mean_activation = torch.stack(self.activation_history).mean(dim=0)
         else:
             mean_activation = torch.mean(activations, dim=0)  # [C]
             std_activation = torch.std(activations, dim=0) + 1e-6
             mean_activation = mean_activation / std_activation
             
+            # Store activation history
+            if len(self.activation_history) >= self.history_size:
+                self.activation_history.pop(0)
+            self.activation_history.append(mean_activation.detach().clone())
+            
+            # Average over history
+            if len(self.activation_history) > 0:
+                mean_activation = torch.stack(self.activation_history).mean(dim=0)
+            
+        # Increment step counter
+        self.current_step += 1
+        
+        # Check if we should consider expansion based on time since last expansion
+        if self.current_step - self.last_expansion_step < self.min_steps_between_expansions:
+            return mean_activation, torch.zeros_like(mean_activation).bool()
+            
+        # Identify under-activated neurons
         under_activated = mean_activation < self.activation_threshold
         return mean_activation, under_activated
         
@@ -65,7 +96,13 @@ class DynamicNeurogenesisModule(nn.Module):
         # Flatten activation patterns if needed
         if len(activation_patterns.shape) > 2:
             b, c, h, w = activation_patterns.shape
-            activation_patterns = activation_patterns.view(b, c, -1).mean(dim=2)
+            # Use spatial information by sampling patches
+            patches = F.unfold(activation_patterns, kernel_size=3, padding=1, stride=2)
+            # Reshape to [B, C*K*K, L] where L is the number of patches
+            b, n_features, n_patches = patches.shape
+            # Reshape to [B*L, C*K*K] for PCA
+            patches = patches.permute(0, 2, 1).reshape(-1, n_features)
+            activation_patterns = patches
             
         # Remove NaN values and normalize
         activation_patterns = torch.nan_to_num(activation_patterns, 0.0)
@@ -84,6 +121,9 @@ class DynamicNeurogenesisModule(nn.Module):
         # If no new neurons can be added, return None
         if n_new <= 0:
             return None
+            
+        # Update last expansion step
+        self.last_expansion_step = self.current_step
             
         if isinstance(layer, nn.Conv2d):
             new_weights = self._generate_conv_weights(layer, V[:n_new])
@@ -118,7 +158,32 @@ class DynamicNeurogenesisModule(nn.Module):
             layer.kernel_size[1]
         )
         
+        # Apply orthogonalization to ensure diversity
+        if new_weights.size(0) > 1:
+            new_weights = self._orthogonalize_weights(new_weights)
+        
         return new_weights
+    
+    def _orthogonalize_weights(self, weights):
+        """Apply Gram-Schmidt orthogonalization to ensure diverse weights"""
+        # Reshape to [N, -1] for orthogonalization
+        n, c, h, w = weights.shape
+        weights_flat = weights.reshape(n, -1)
+        
+        # Apply Gram-Schmidt process
+        for i in range(1, n):
+            for j in range(i):
+                # Project weights[i] onto weights[j]
+                projection = torch.sum(weights_flat[i] * weights_flat[j]) / (torch.sum(weights_flat[j] * weights_flat[j]) + 1e-8)
+                # Subtract projection
+                weights_flat[i] = weights_flat[i] - projection * weights_flat[j]
+            
+            # Normalize
+            norm = torch.norm(weights_flat[i]) + 1e-8
+            weights_flat[i] = weights_flat[i] / norm
+        
+        # Reshape back to original shape
+        return weights_flat.reshape(n, c, h, w)
         
     def _generate_linear_weights(self, layer, basis_vectors):
         """Generate new linear layer weights"""
@@ -129,6 +194,24 @@ class DynamicNeurogenesisModule(nn.Module):
         
         # Normalize the weights
         new_weights = F.normalize(basis_vectors, dim=1)
+        
+        # Apply orthogonalization for diversity
+        if new_weights.size(0) > 1:
+            # Reshape to [N, -1] for orthogonalization
+            n, f = new_weights.shape
+            
+            # Apply Gram-Schmidt process
+            for i in range(1, n):
+                for j in range(i):
+                    # Project weights[i] onto weights[j]
+                    projection = torch.sum(new_weights[i] * new_weights[j]) / (torch.sum(new_weights[j] * new_weights[j]) + 1e-8)
+                    # Subtract projection
+                    new_weights[i] = new_weights[i] - projection * new_weights[j]
+                
+                # Normalize
+                norm = torch.norm(new_weights[i]) + 1e-8
+                new_weights[i] = new_weights[i] / norm
+        
         return new_weights
         
     def expand_layer(self, layer, activation_patterns):

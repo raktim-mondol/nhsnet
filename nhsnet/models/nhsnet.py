@@ -6,6 +6,24 @@ from ..layers.structured_sparse import StructuredSparseConv2d
 from ..layers.hh_gating import HodgkinHuxleyGating
 from ..layers.dynamic_neurogenesis import DynamicNeurogenesisModule
 
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation block for channel attention"""
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Sigmoid()
+        )
+        
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
 class NHSNetBlock(nn.Module):
     """Enhanced building block for NHS-Net with residual connections"""
     def __init__(self, 
@@ -14,7 +32,9 @@ class NHSNetBlock(nn.Module):
                  hebbian_lr=0.01,
                  sparsity_ratio=0.5,
                  stride=1,
-                 residual_scale=0.1):
+                 residual_scale=0.1,
+                 use_se=True,
+                 dropout_rate=0.1):
         super().__init__()
         
         self.hebbian_lr = hebbian_lr
@@ -22,6 +42,7 @@ class NHSNetBlock(nn.Module):
         self.out_channels = out_channels
         self.stride = stride
         self.residual_scale = residual_scale
+        self.use_se = use_se
         
         # Main path with channel normalization
         self.conv1 = HebbianConv2d(
@@ -49,11 +70,18 @@ class NHSNetBlock(nn.Module):
         # Gating mechanism
         self.gating = HodgkinHuxleyGating(out_channels)
         
+        # Squeeze-and-Excitation attention
+        if use_se:
+            self.se = SEBlock(out_channels, reduction=8)
+        
         # Shortcut connection
         self._make_shortcut()
         
-        # Reduced dropout for better stability
-        self.dropout = nn.Dropout(0.1)
+        # Dropout for regularization
+        self.dropout = nn.Dropout(dropout_rate)
+        
+        # Layer normalization for better stability
+        self.layer_norm = nn.GroupNorm(min(32, out_channels), out_channels)
         
     def _make_shortcut(self):
         """Create or update shortcut connection"""
@@ -75,11 +103,8 @@ class NHSNetBlock(nn.Module):
             self.shortcut = nn.Identity()
             
     def _apply_layer_norm(self, x):
-        """Apply instance normalization for better stability"""
-        # Normalize each channel independently
-        mean = x.mean(dim=[2, 3], keepdim=True)
-        var = x.var(dim=[2, 3], keepdim=True, unbiased=False)
-        return (x - mean) / torch.sqrt(var + 1e-5)
+        """Apply group normalization for better stability"""
+        return self.layer_norm(x)
         
     def reset_parameters(self):
         """Reset all parameters of the block"""
@@ -91,6 +116,10 @@ class NHSNetBlock(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
                 
     def _update_channels(self, new_channels):
         """Update the block's channel dimensions"""
@@ -121,6 +150,11 @@ class NHSNetBlock(nn.Module):
         
         self.bn2 = nn.BatchNorm2d(new_channels).to(device)
         self.gating = HodgkinHuxleyGating(new_channels).to(device)
+        self.layer_norm = nn.GroupNorm(min(32, new_channels), new_channels).to(device)
+        
+        # Update SE block if used
+        if self.use_se:
+            self.se = SEBlock(new_channels, reduction=8).to(device)
         
         # Update shortcut
         self._make_shortcut()
@@ -138,41 +172,49 @@ class NHSNetBlock(nn.Module):
         self.sparse_conv = self.sparse_conv.to(device)
         self.bn2 = self.bn2.to(device)
         self.gating = self.gating.to(device)
+        self.layer_norm = self.layer_norm.to(device)
+        if self.use_se:
+            self.se = self.se.to(device)
         self.shortcut = self.shortcut.to(device)
         return self
 
 class NHSNet(nn.Module):
     """Enhanced NHS-Net architecture with stable channel management"""
     def __init__(self,
-                 input_channels=3,  # Changed from 256 to 3 for CIFAR-10
+                 input_channels=3,
                  num_classes=10,
-                 initial_channels=32,  # Reduced initial channels
-                 num_blocks=[2, 2, 2, 2],
-                 hebbian_lr=0.005,  # Reduced hebbian learning rate
-                 sparsity_ratio=0.3,  # Reduced sparsity for more connections
-                 max_grad_norm=0.5):  # Reduced gradient norm for stability
+                 initial_channels=64,
+                 num_blocks=[3, 4, 6, 3],
+                 hebbian_lr=0.005,
+                 sparsity_ratio=0.3,
+                 max_grad_norm=0.5,
+                 dropout_rate=0.2,
+                 use_se=True):
         super().__init__()
         
         self.initial_channels = initial_channels
         self.max_grad_norm = max_grad_norm
         
-        # Initial convolution with smaller channel count
+        # Improved stem with more channels and better initialization
         self.stem = nn.Sequential(
-            nn.Conv2d(input_channels, initial_channels, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(input_channels, initial_channels, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(initial_channels),
-            nn.ReLU()
+            nn.ReLU(inplace=True),
+            nn.Conv2d(initial_channels, initial_channels, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(initial_channels),
+            nn.ReLU(inplace=True)
         )
         
         # Build network stages
         self.stages = nn.ModuleList()
         current_channels = initial_channels
         
-        # Fixed channel progression
+        # Fixed channel progression with wider networks
         channels_per_stage = [
-            initial_channels,      # Stage 1: 32
-            initial_channels * 2,  # Stage 2: 64
-            initial_channels * 4,  # Stage 3: 128
-            initial_channels * 8   # Stage 4: 256
+            initial_channels,      # Stage 1
+            initial_channels * 2,  # Stage 2
+            initial_channels * 4,  # Stage 3
+            initial_channels * 8   # Stage 4
         ]
         
         # Build stages with fixed channel counts
@@ -188,7 +230,9 @@ class NHSNet(nn.Module):
                     hebbian_lr=hebbian_lr,
                     sparsity_ratio=sparsity_ratio,
                     stride=stride,
-                    residual_scale=0.2  # Increased residual scaling
+                    residual_scale=0.2,  # Increased residual scaling
+                    use_se=use_se,
+                    dropout_rate=dropout_rate
                 )
                 stage.append(block)
                 current_channels = out_channels
@@ -204,18 +248,25 @@ class NHSNet(nn.Module):
             weight_scale=0.005  # Smaller weight scale for new neurons
         )
         
-        # Global pooling and classification
+        # Global pooling and improved classification head
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.classifier = nn.Sequential(
             nn.Linear(channels_per_stage[-1], 512),
             nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.2),  # Reduced dropout
-            nn.Linear(512, num_classes)
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout_rate/2),
+            nn.Linear(256, num_classes)
         )
         
         # Initialize weights
         self._initialize_weights()
+        
+        # Mixup augmentation strength
+        self.mixup_alpha = 0.2
         
     def _initialize_weights(self):
         for m in self.modules():
@@ -223,18 +274,36 @@ class NHSNet(nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-            elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+            elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 nn.init.constant_(m.bias, 0)
                 
     def _update_channels(self, block, new_channels):
         """Helper method to update block channels"""
         return block._update_channels(new_channels)
     
-    def forward(self, x):
+    def _mixup(self, x, targets):
+        """Apply mixup augmentation during training"""
+        if self.training and self.mixup_alpha > 0:
+            batch_size = x.size(0)
+            lam = torch.distributions.beta.Beta(self.mixup_alpha, self.mixup_alpha).sample().to(x.device)
+            index = torch.randperm(batch_size).to(x.device)
+            
+            mixed_x = lam * x + (1 - lam) * x[index]
+            targets_a, targets_b = targets, targets[index]
+            return mixed_x, targets_a, targets_b, lam
+        return x, targets, None, None
+    
+    def forward(self, x, targets=None):
+        # Apply mixup if targets are provided
+        lam = None
+        targets_a = targets_b = None
+        if targets is not None:
+            x, targets_a, targets_b, lam = self._mixup(x, targets)
+        
         # Apply gradient clipping to prevent exploding gradients
         if self.training and x.requires_grad:
             x.register_hook(lambda grad: torch.nn.utils.clip_grad_norm_(grad, self.max_grad_norm))
@@ -269,19 +338,23 @@ class NHSNet(nn.Module):
                 out = block.conv1(x)
                 out = block.bn1(out)
                 out = block._apply_layer_norm(out)
-                out = F.relu(out)
+                out = F.relu(out, inplace=True)
                 
                 out = block.sparse_conv(out)
                 out = block.bn2(out)
                 out = block._apply_layer_norm(out)
                 out = block.gating(out)
                 
+                # Apply SE attention if enabled
+                if block.use_se:
+                    out = block.se(out)
+                
                 # Residual connection
                 shortcut_out = block.shortcut(identity)
                 
                 # Residual addition with scaling
                 out = out * block.residual_scale + shortcut_out
-                out = F.relu(out)
+                out = F.relu(out, inplace=True)
                 out = block.dropout(out)
                 
                 # Handle NaN values
@@ -335,4 +408,9 @@ class NHSNet(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.classifier(x)
+        
+        # Apply mixup loss if used
+        if self.training and lam is not None and targets_a is not None and targets_b is not None:
+            return x, targets_a, targets_b, lam
+        
         return x
