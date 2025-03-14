@@ -144,7 +144,7 @@ class NHSNetBlock(nn.Module):
 class NHSNet(nn.Module):
     """Enhanced NHS-Net architecture with stable channel management"""
     def __init__(self,
-                 input_channels=3,
+                 input_channels=3,  # Changed from 256 to 3 for CIFAR-10
                  num_classes=10,
                  initial_channels=32,  # Reduced initial channels
                  num_blocks=[2, 2, 2, 2],
