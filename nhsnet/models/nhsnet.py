@@ -208,6 +208,46 @@ class NHSNetBlock(nn.Module):
         self.shortcut = self.shortcut.to(device)
         return self
 
+    def forward(self, x):
+        """Forward pass through the NHSNetBlock"""
+        # Get device from input tensor
+        device = x.device
+        
+        # Ensure all components are on the correct device
+        if next(self.parameters()).device != device:
+            self.to(device)
+            
+        identity = x
+        
+        # Main path
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self._apply_layer_norm(out)
+        out = F.relu(out, inplace=True)
+        
+        out = self.sparse_conv(out)
+        out = self.bn2(out)
+        out = self._apply_layer_norm(out)
+        out = self.gating(out)
+        
+        # Apply SE attention if enabled
+        if self.use_se:
+            out = self.se(out)
+        
+        # Residual connection
+        shortcut_out = self.shortcut(identity)
+        
+        # Residual addition with scaling
+        out = out * self.residual_scale + shortcut_out
+        out = F.relu(out, inplace=True)
+        out = self.dropout(out)
+        
+        # Handle NaN values
+        if torch.isnan(out).any():
+            out = identity
+            
+        return out
+
 class NHSNet(nn.Module):
     """Enhanced NHS-Net architecture with stable channel management"""
     def __init__(self,

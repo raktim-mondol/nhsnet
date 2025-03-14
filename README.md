@@ -26,10 +26,10 @@ This repository contains a hybrid neural network architecture that combines trad
 
 ### Training Example
 
-The `example_cnn_nhsnet.py` script demonstrates how to train the CNN-NHSNet model on the CIFAR-10 dataset:
+The `nhsnet/examples/example_cnn_nhsnet.py` script demonstrates how to train the CNN-NHSNet model on the CIFAR-10 dataset:
 
 ```bash
-python example_cnn_nhsnet.py
+python nhsnet/examples/example_cnn_nhsnet.py
 ```
 
 This script:
@@ -41,10 +41,10 @@ This script:
 
 ### Inference Example
 
-The `inference_example.py` script demonstrates how to use the trained model for inference:
+The `nhsnet/examples/inference_example.py` script demonstrates how to use the trained model for inference:
 
 ```bash
-python inference_example.py
+python nhsnet/examples/inference_example.py
 ```
 
 This script:
