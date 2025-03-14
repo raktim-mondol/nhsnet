@@ -23,6 +23,16 @@ class HodgkinHuxleyGating(nn.Module):
             nn.Linear(channels * 2, channels * 3)  # 3 gates: n, m, h
         )
         
+        # Initialize weights
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize weights with proper scaling"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.constant_(m.bias, 0)
+        
     def reset_state(self):
         """Reset gating variables to initial state"""
         device = next(self.parameters()).device
@@ -39,6 +49,25 @@ class HodgkinHuxleyGating(nn.Module):
         batch_size = x.size(0)
         device = x.device
         
+        # Ensure all parameters are on the same device as input
+        for param in self.parameters():
+            if param.device != device:
+                param.data = param.data.to(device)
+                
+        # Ensure buffers are on the same device as input
+        if self.n.device != device:
+            self.n = self.n.to(device)
+            self.m = self.m.to(device)
+            self.h = self.h.to(device)
+        
+        # Check for channel mismatch and update if needed
+        if x.size(1) != self.channels:
+            self._update_channels(x.size(1), device)
+        
+        # Check for NaN values
+        if torch.isnan(x).any():
+            return x  # Skip gating if input contains NaN
+            
         # Compute channel-wise statistics
         x_stats = torch.mean(x, dim=[2, 3])  # [B, C]
         
@@ -82,4 +111,29 @@ class HodgkinHuxleyGating(nn.Module):
         above_threshold = (torch.abs(gated_output) > self.v_threshold).float()
         gated_output = gated_output * (1 - above_threshold) + self.v_reset * above_threshold
         
+        # Check for NaN values in output
+        if torch.isnan(gated_output).any():
+            return x  # Return original input if output contains NaN
+            
         return gated_output
+        
+    def _update_channels(self, new_channels, device):
+        """Update the module to handle a different number of channels"""
+        # Store old channels
+        old_channels = self.channels
+        self.channels = new_channels
+        
+        # Update gating variables
+        self.register_buffer('n', torch.zeros(1, new_channels, 1, 1, device=device))
+        self.register_buffer('m', torch.zeros(1, new_channels, 1, 1, device=device))
+        self.register_buffer('h', torch.zeros(1, new_channels, 1, 1, device=device))
+        
+        # Update neural network
+        self.gate_network = nn.Sequential(
+            nn.Linear(new_channels, new_channels * 2),
+            nn.ReLU(),
+            nn.Linear(new_channels * 2, new_channels * 3)
+        ).to(device)
+        
+        # Initialize weights
+        self._init_weights()
