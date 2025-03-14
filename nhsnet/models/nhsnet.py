@@ -6,6 +6,25 @@ from ..layers.structured_sparse import StructuredSparseConv2d
 from ..layers.hh_gating import HodgkinHuxleyGating
 from ..layers.dynamic_neurogenesis import DynamicNeurogenesisModule
 
+def calculate_groups_for_channels(channels, max_groups=32):
+    """Calculate the appropriate number of groups for GroupNorm.
+    
+    Args:
+        channels: Number of channels
+        max_groups: Maximum number of groups to consider
+        
+    Returns:
+        Number of groups that divides channels evenly
+    """
+    # Start with the maximum number of groups
+    num_groups = min(max_groups, channels)
+    
+    # Find the largest divisor of channels that is <= max_groups
+    while channels % num_groups != 0 and num_groups > 1:
+        num_groups -= 1
+        
+    return num_groups
+
 class SEBlock(nn.Module):
     """Squeeze-and-Excitation block for channel attention"""
     def __init__(self, channels, reduction=16):
@@ -87,7 +106,9 @@ class NHSNetBlock(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
         
         # Layer normalization for better stability
-        self.layer_norm = nn.GroupNorm(min(32, out_channels), out_channels)
+        # Ensure number of groups is a valid divisor of out_channels
+        num_groups = calculate_groups_for_channels(out_channels)
+        self.layer_norm = nn.GroupNorm(num_groups, out_channels)
         
     def _make_shortcut(self):
         """Create or update shortcut connection"""
@@ -156,7 +177,10 @@ class NHSNetBlock(nn.Module):
         
         self.bn2 = nn.BatchNorm2d(new_channels).to(device)
         self.gating = HodgkinHuxleyGating(new_channels).to(device)
-        self.layer_norm = nn.GroupNorm(min(32, new_channels), new_channels).to(device)
+        
+        # Ensure number of groups is a valid divisor of new_channels
+        num_groups = calculate_groups_for_channels(new_channels)
+        self.layer_norm = nn.GroupNorm(num_groups, new_channels).to(device)
         
         # Update SE block if used
         if self.use_se:

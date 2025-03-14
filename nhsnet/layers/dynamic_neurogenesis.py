@@ -253,6 +253,34 @@ class DynamicNeurogenesisModule(nn.Module):
             if new_out_channels > self.max_neurons:
                 return layer
                 
+            # Adjust the number of new neurons to ensure compatibility with GroupNorm
+            # This ensures new_out_channels is divisible by common group sizes (8, 16, 32)
+            for divisor in [32, 16, 8, 4, 2]:
+                if divisor < new_out_channels:
+                    remainder = new_out_channels % divisor
+                    if remainder != 0:
+                        # Adjust new_weights to make new_out_channels divisible by divisor
+                        if remainder < new_weights.size(0):
+                            # Remove some neurons
+                            new_weights = new_weights[:(new_weights.size(0) - remainder)]
+                            new_out_channels = layer.out_channels + new_weights.size(0)
+                            print(f"Adjusted new neurons to ensure divisibility by {divisor}: {new_out_channels}")
+                        else:
+                            # Add some neurons to make it divisible
+                            padding_needed = divisor - remainder
+                            if layer.out_channels + new_weights.size(0) + padding_needed <= self.max_neurons:
+                                # Create additional neurons by duplicating and slightly perturbing existing ones
+                                additional_weights = new_weights[:padding_needed].clone()
+                                # Add small random noise to make them different
+                                additional_weights += torch.randn_like(additional_weights) * 0.01
+                                # Normalize the additional weights
+                                additional_weights = self._normalize_weights(additional_weights)
+                                # Concatenate with original new_weights
+                                new_weights = torch.cat([new_weights, additional_weights], dim=0)
+                                new_out_channels = layer.out_channels + new_weights.size(0)
+                                print(f"Added {padding_needed} neurons to ensure divisibility by {divisor}: {new_out_channels}")
+                        break
+                
             # Create new layer with correct dimensions
             expanded_layer = nn.Conv2d(
                 layer.in_channels,  # Keep original input channels
