@@ -7,8 +7,8 @@ from torch.utils.data import DataLoader
 import os
 import sys
 
-# Add the parent directory to the path to import nhsnet
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# Add parent directory to path to import nhsnet
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import the CNN-NHSNet model
 from nhsnet.models import CNNNHSNet
@@ -39,12 +39,12 @@ def main():
     # Load CIFAR-10 dataset
     print("Downloading and preparing CIFAR-10 dataset...")
     trainset = torchvision.datasets.CIFAR10(
-        root='./data', train=True, download=True, transform=transform_train)
+        root='../data', train=True, download=True, transform=transform_train)
     trainloader = DataLoader(
         trainset, batch_size=batch_size, shuffle=True, num_workers=2)
     
     testset = torchvision.datasets.CIFAR10(
-        root='./data', train=False, download=True, transform=transform_test)
+        root='../data', train=False, download=True, transform=transform_test)
     testloader = DataLoader(
         testset, batch_size=batch_size, shuffle=False, num_workers=2)
     
@@ -131,8 +131,9 @@ def main():
     print("Training complete!")
     
     # Save the model
-    torch.save(model.state_dict(), 'cnn_nhsnet_model.pth')
-    print("Model saved to 'cnn_nhsnet_model.pth'")
+    save_path = os.path.join(os.path.dirname(__file__), '../cnn_nhsnet_model.pth')
+    torch.save(model.state_dict(), save_path)
+    print(f"Model saved to '{save_path}'")
 
 if __name__ == '__main__':
     main() 

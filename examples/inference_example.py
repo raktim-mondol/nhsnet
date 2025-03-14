@@ -7,8 +7,8 @@ import numpy as np
 import os
 import sys
 
-# Add the parent directory to the path to import nhsnet
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# Add parent directory to path to import nhsnet
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import the CNN-NHSNet model
 from nhsnet.models import CNNNHSNet
@@ -38,7 +38,7 @@ def main():
     # Load CIFAR-10 test dataset
     print("Loading CIFAR-10 test dataset...")
     testset = torchvision.datasets.CIFAR10(
-        root='./data', train=False, download=True, transform=transform)
+        root='../data', train=False, download=True, transform=transform)
     testloader = DataLoader(
         testset, batch_size=4, shuffle=True, num_workers=2)
     
@@ -61,7 +61,7 @@ def main():
     ).to(device)
     
     # Check if a saved model exists
-    model_path = 'cnn_nhsnet_model.pth'
+    model_path = os.path.join(os.path.dirname(__file__), '../cnn_nhsnet_model.pth')
     if os.path.exists(model_path):
         print(f"Loading saved model from {model_path}")
         model.load_state_dict(torch.load(model_path, map_location=device))
