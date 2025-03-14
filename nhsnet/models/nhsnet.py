@@ -20,6 +20,12 @@ class SEBlock(nn.Module):
         
     def forward(self, x):
         b, c, _, _ = x.size()
+        device = x.device
+        
+        # Ensure module is on the same device as input
+        if next(self.parameters()).device != device:
+            self.to(device)
+            
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1, 1)
         return x * y.expand_as(x)
@@ -279,7 +285,8 @@ class NHSNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                nn.init.constant_(m.bias, 0)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
                 
     def _update_channels(self, block, new_channels):
         """Helper method to update block channels"""
@@ -287,7 +294,7 @@ class NHSNet(nn.Module):
     
     def _mixup(self, x, targets):
         """Apply mixup augmentation during training"""
-        if self.training and self.mixup_alpha > 0:
+        if self.training and self.mixup_alpha > 0 and targets is not None:
             batch_size = x.size(0)
             lam = torch.distributions.beta.Beta(self.mixup_alpha, self.mixup_alpha).sample().to(x.device)
             index = torch.randperm(batch_size).to(x.device)

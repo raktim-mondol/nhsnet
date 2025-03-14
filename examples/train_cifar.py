@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,6 +11,8 @@ from tqdm import tqdm
 import numpy as np
 import random
 
+# Add the parent directory to the path to ensure imports work correctly
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from nhsnet.models.nhsnet import NHSNet
 from nhsnet.utils.pruning import AdaptiveSynapticPruning
 
@@ -25,14 +28,23 @@ def set_seed(seed):
 
 def get_transforms():
     """Get data augmentation and normalization transforms"""
-    train_transform = transforms.Compose([
+    train_transform_list = [
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-        transforms.RandAugment(num_ops=2, magnitude=9),  # Add RandAugment
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-    ])
+    ]
+    
+    # Add RandAugment if available in this torchvision version
+    try:
+        from torchvision.transforms import RandAugment
+        train_transform_list.insert(3, RandAugment(num_ops=2, magnitude=9))
+        print("Using RandAugment for data augmentation")
+    except ImportError:
+        print("RandAugment not available in this torchvision version, using standard augmentation")
+    
+    train_transform = transforms.Compose(train_transform_list)
     
     test_transform = transforms.Compose([
         transforms.ToTensor(),
