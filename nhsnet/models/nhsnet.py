@@ -377,17 +377,26 @@ class NHSNet(nn.Module):
                     # Ensure neurogenesis module is on the correct device
                     self.neurogenesis = self.neurogenesis.to(device)
                     
+                    # Get the next stage and its first block
+                    next_stage = self.stages[stage_idx + 1]
+                    next_stage = next_stage.to(device)
+                    self.stages[stage_idx + 1] = next_stage
+                    
+                    first_block = next_stage[0]
+                    first_block = first_block.to(device)
+                    
+                    # Skip neurogenesis if there's already a channel mismatch
+                    # This prevents issues with activation history sizes
+                    if x.size(1) != first_block.in_channels:
+                        # Just update the block's input channels
+                        first_block.in_channels = x.size(1)
+                        first_block._make_shortcut()
+                        continue
+                    
+                    # Compute activation statistics
                     mean_activation, under_activated = self.neurogenesis.compute_activation_statistics(x)
+                    
                     if under_activated.any() and not torch.isnan(mean_activation).any():
-                        next_stage = self.stages[stage_idx + 1]
-                        # Ensure next stage is on the correct device
-                        next_stage = next_stage.to(device)
-                        self.stages[stage_idx + 1] = next_stage
-                        
-                        first_block = next_stage[0]
-                        # Ensure first block is on the correct device
-                        first_block = first_block.to(device)
-                        
                         # Update the first block's input channels to match current output
                         first_block.in_channels = x.size(1)
                         

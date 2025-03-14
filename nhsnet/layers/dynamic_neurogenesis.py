@@ -45,6 +45,11 @@ class DynamicNeurogenesisModule(nn.Module):
             # Normalize activations
             mean_activation = mean_activation / std_activation
             
+            # Clear history if tensor size changes
+            if len(self.activation_history) > 0 and self.activation_history[0].size(0) != mean_activation.size(0):
+                print(f"Clearing activation history due to size change: {self.activation_history[0].size(0)} -> {mean_activation.size(0)}")
+                self.activation_history = []
+            
             # Store activation history for more stable decisions
             if len(self.activation_history) >= self.history_size:
                 self.activation_history.pop(0)
@@ -57,6 +62,11 @@ class DynamicNeurogenesisModule(nn.Module):
             mean_activation = torch.mean(activations, dim=0)  # [C]
             std_activation = torch.std(activations, dim=0) + 1e-6
             mean_activation = mean_activation / std_activation
+            
+            # Clear history if tensor size changes
+            if len(self.activation_history) > 0 and self.activation_history[0].size(0) != mean_activation.size(0):
+                print(f"Clearing activation history due to size change: {self.activation_history[0].size(0)} -> {mean_activation.size(0)}")
+                self.activation_history = []
             
             # Store activation history
             if len(self.activation_history) >= self.history_size:
@@ -219,6 +229,11 @@ class DynamicNeurogenesisModule(nn.Module):
         # Ensure we're on the same device as the input
         device = activation_patterns.device
         
+        # Check for channel mismatch between activation patterns and layer
+        if isinstance(layer, nn.Conv2d) and activation_patterns.size(1) != layer.in_channels:
+            print(f"Skipping expansion due to channel mismatch: activation={activation_patterns.size(1)}, layer={layer.in_channels}")
+            return layer
+            
         new_weights = self.generate_new_neurons(layer, activation_patterns)
         if new_weights is None:
             return layer
